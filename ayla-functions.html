@@ -1,0 +1,67 @@
+<!--
+Copyright (c) 2016 The Ayla Project Authors.
+This code may only be used under the MIT style license found at http://aylaweb.github.io/LICENSE.txt
+The complete set of authors may be found at http://aylaweb.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://aylaweb.github.io/CONTRIBUTORS.txt
+-->
+
+<script>
+    document.isDomReady = function (elemId) {
+        return new Promise(function (resolve, reject) {
+            if (window[elemId]) {
+                resolve(window[elemId]);
+            }
+            else {
+                if (elemId && (elemId !== 'undefined')) {
+
+                    document.addEventListener('attached-' + elemId, function (e)
+                    {
+
+                        resolve(e.target);
+                    });
+                }
+            }
+        });
+    };
+    Rx.Observable.prototype.neutralize = function () {
+        var source = this;
+        return Rx.Observable.create(function (observer) {
+            var map = new Map();
+            return source.subscribe(
+                    function (value)
+                    {
+
+                        if (value.type.indexOf('-specific') >= 0) {
+                            if (map.has(value.detail)) {
+                                map.delete(value.detail);
+                            }
+                            else {
+                                map.set(value.detail, 3);
+                            }
+                        }
+                        else if (value.type.indexOf('-confirm') >= 0) {
+                            if (map.get(value.detail)) {
+                                observer.onNext(value);
+                                map.delete(value.detail);
+                            }
+                            else {
+                                map.set(value.detail, 2);
+                            }
+                        }
+                        else {
+                            if (map.get(value.detail)) {
+                                map.delete(value.detail);
+
+                            }
+                            else {
+                                map.set(value.detail, 1);
+
+                            }
+                        }
+                    },
+                    observer.onError.bind(observer),
+                    observer.onCompleted.bind(observer)
+                    );
+        });
+    };
+</script>

@@ -1,0 +1,35 @@
+<!--
+Copyright (c) 2016 The Ayla Project Authors.
+This code may only be used under the MIT style license found at http://aylaweb.github.io/LICENSE.txt
+The complete set of authors may be found at http://aylaweb.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://aylaweb.github.io/CONTRIBUTORS.txt
+-->
+
+<script>
+    window.Ayla = window.Ayla || {};
+    Ayla.Cursor = Ayla.Cursor || {
+        _elem: null,
+        _id: null,
+        get elem() {
+            return this._elem;
+        },
+        set elem(elem) {
+            this._elem = elem;
+        },
+        get id() {
+            return this._id;
+        },
+        set id(id) {
+            this._id = id;
+        },
+        destroy: function () {
+
+            this.elem.anima.forEach(function (anima, index) {
+                if (anima.id && (this.id === anima.id)) {
+                    anima.animation.destroy();
+                }
+            }, this);
+        }
+
+    };
+</script>

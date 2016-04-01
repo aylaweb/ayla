@@ -1,0 +1,281 @@
+<!--
+Copyright (c) 2016 The Ayla Project Authors.
+This code may only be used under the MIT style license found at http://aylaweb.github.io/LICENSE.txt
+The complete set of authors may be found at http://aylaweb.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://aylaweb.github.io/CONTRIBUTORS.txt
+-->
+
+<link rel="import" href="../libs-html/rxjs.html">
+<link rel="import" href="../libs-html/transducers.html">
+<link rel="import" href="../libs-html/esprima.html">
+<link rel="import" href="../libs-html/escodegen.html">
+<link rel="import" href="../libs-html/esquery.html">
+
+<script>
+    window.Ayla = window.Ayla || {};
+    Ayla.Rule = Ayla.Rule || {
+        _elem: null,
+        _whenAST: null,
+        _observable: null,
+        _doAST: null,
+        _transducer: null,
+        _thenAST: null,
+        _subjectRx: null,
+        get elem() {
+            return this._elem;
+        },
+        set elem(elem) {
+            this._elem = elem;
+        },
+        get whenAST() {
+            if (this._whenAST)
+                return this._whenAST;
+            else {
+                this.whenAST = this.when;
+                return this._whenAST;
+            }
+        },
+        set whenAST(when) {
+            this._whenAST = esprima.parse(when);
+        },
+        get observable() {
+            if (this._observable)
+                return this._observable;
+            else {
+                this.observable = this.whenAST;
+                return this._observable;
+            }
+        },
+        set observable(whenAST) {
+            var expression = esquery(whenAST, 'MemberExpression')[0];
+            var observed = expression.property.name;
+            var element = expression.object.name;
+            var elementDOM = document.querySelector('#' + element);
+            if (elementDOM.mux) {
+                if (observed.indexOf('$') >= 0) {
+                    var subElement = observed.split('$')[0];
+                    var property = observed.split('$')[1];
+                }
+            }
+            if (observed.indexOf("onevent_") >= 0) {
+                var event = observed.split('_')[1];
+                var prop = observed.split('_')[2];
+                if (!elementDOM['_observableon' + event]) {
+                    elementDOM['_observableon' + event] = Rx.Observable.fromEvent(elementDOM, event)
+                            .map(function (x) {
+                                var res = x.detail.value;
+                                if (prop) {
+                                    res = x.detail.value[prop];
+                                }
+                                return (res);
+                            }
+                            );
+                }
+                this._observable = elementDOM['_observableon' + event]
+                        .transduce(this.transducer);
+            }
+            else if (observed.indexOf("oninjection_") >= 0) {
+                var event = observed.split('_')[1];
+                var prop = observed.split('_')[2];
+                if (!elementDOM['_observableinjection' + event]) {
+                    elementDOM['_observableinjection' + event] = Rx.Observable.fromEvent(elementDOM, "inject_" + event)
+                            .map(function (x) {
+                                var res = x.detail.value;
+                                if (prop) {
+                                    res = x.detail.value[prop];
+                                }
+                                return (res);
+                            }
+                            );
+                }
+                this._observable = elementDOM['_observableinjection' + event]
+                        .transduce(this.transducer);
+            }
+            else if (observed.indexOf("_length") >= 0) {
+                var property = property.split('-')[0]
+                if (!elementDOM[property + "_length"]) {
+                    elementDOM['_observable' + property + "Length"] = Rx.Observable.fromEvent(elementDOM, Polymer.CaseMap.camelToDashCase(property) + '-changed')
+                            .filter(function (x) {
+                                return (x.detail.path === observed + ".length");
+                            });
+                }
+                this._observable = elementDOM['_observable' + property + "Length"]
+                        .transduce(this.transducer);
+            }
+            else {
+                var property = observed;
+                if (!elementDOM['_observable' + property]) {
+                    elementDOM['_observable' + property] = Rx.Observable.fromEvent(elementDOM, Polymer.CaseMap.camelToDashCase(property) + '-changed')
+                            .filter(function (x) {
+                                return !(x.detail.path === property + ".length");
+                            })
+                            .map(function (x) {
+                                if (x.detail.value instanceof Object)
+                                {
+                                    return (_.cloneDeep(x.detail.value));
+                                }
+                                else {
+                                    return (x.detail.value);
+                                }
+                            });
+                }
+                if (!this["_observable" + property + "Specific"]) {
+                    this["_observable" + property + "Specific"] = Rx.Observable.fromEvent(this.elem, Polymer.CaseMap.camelToDashCase(property) + '-specific');
+                }
+                var initValue = elementDOM[property] && transducers.into([], this.transducer, _.flatten([elementDOM[property]]));
+                var observableInit = (initValue && initValue.length > 0) ? Rx.Observable.fromArray(initValue) : Rx.Observable.empty();
+                if (subElement) {
+                    if (!this["observable" + subElement + property]) {
+                        this["observable" + subElement + property] = Rx.Observable.fromEvent(elementDOM, subElement + "$" + Polymer.CaseMap.camelToDashCase(property) + '-changed')
+                                .tap(function (e) {
+                                    this.elem.fire(Polymer.CaseMap.camelToDashCase(property) + '-specific', e.detail);
+                                }.bind(this))
+                                .map(function (x) {
+                                    return (x.detail.value);
+                                });
+                    }
+                    this._observable = Rx.Observable.defer(function () {
+                        return observableInit
+                                .concat(this["observable" + subElement + property]
+                                        .transduce(this.transducer));
+                    }.bind(this))
+                }
+                else if (elementDOM.mux) {
+                    this._observable = Rx.Observable.defer(function () {
+                        return observableInit
+                                .concat(elementDOM["observable" + property]
+                                        .merge(elementDOM["observable" + property + "Confirm"])
+                                        .merge(this["observable" + property + "Specific"])
+                                        .neutralize()
+                                        .map(function (x) {
+                                            return (x.detail.value);
+                                        }
+                                        ))
+
+                                .transduce(this.transducer);
+                    }.bind(this))
+
+                }
+
+                else {
+                    this._observable = Rx.Observable.defer(function () {
+                        return observableInit
+                                .concat(elementDOM["_observable" + property]
+                                        .transduce(this.transducer));
+                    }.bind(this));
+                }
+
+            }
+        },
+        get doAST() {
+            if (this._doAST)
+                return this._doAST;
+            else {
+                this.doAST = this.do;
+                return this._doAST;
+            }
+        },
+        set doAST(d_o) {
+            if (!d_o)
+                d_o = "transducers.identity";
+            this._doAST = esprima.parse(d_o);
+        },
+        get transducer() {
+            if (this._transducer)
+                return this._transducer;
+            else {
+                this.transducer = this.doAST;
+                return this._transducer;
+            }
+        },
+        set transducer(doAST) {
+            var next = (new Function("", "return " + escodegen.generate(doAST))).bind(this.elem)();
+            //  this._transducer = eval(escodegen.generate(doAST));
+            this._transducer = next;
+        },
+        get thenAST() {
+            if (this._thenAST)
+                return this._thenAST;
+            else {
+                this.thenAST = this.then;
+                return this._thenAST;
+            }
+        },
+        set thenAST(then) {
+            this._thenAST = esprima.parse(then);
+            var nodes = esquery(this.thenAST, 'Identifier');
+            nodes.forEach(function (node) {
+                if (node.name.charAt(node.name.length - 1) === '$') {
+                    node.name = this.elem[node.name.slice(0, -1)];
+                }
+            }.bind(this));
+        },
+        get observer() {
+            if (this._observer)
+                return this._observer;
+            else {
+                this.observer = this.thenAST;
+                return this._observer;
+            }
+        },
+        set observer(thenAST) {
+            if (thenAST.body[0].type === 'ExpressionStatement') {
+                expression = esquery(thenAST, 'ExpressionStatement')[0];
+                var property = expression.expression.name;
+                var next = function (x) {
+                    if (x.constructor === Object) {
+                        if (x && x.indexSplices && (x.indexSplices[0].addedCount > 0)) {
+
+                            var args = [property, x.indexSplices[0].index, x.indexSplices[0].addedCount].concat(x.indexSplices[0].object.slice(x.indexSplices[0].index, x.indexSplices[0].index + x.indexSplices[0].addedCount));
+                            this.elem.splice.apply(this.elem, args);
+                        }
+                        else if (x && x.indexSplices && (x.indexSplices[0].removed.length > 0)) {
+                            this.elem.splice(property, x.indexSplices[0].index, x.indexSplices[0].removed.length)
+                        }
+                        else
+                            this.elem.push(property, x);
+                    }
+                    else
+                    {
+                        this.elem[property] = x;
+                    }
+                }.bind(this);
+            }
+            else {
+                //     var next = (new Function("x", "{if (this.rules[2].when === 'controlOnOff$.pressed') console.log(x); " + escodegen.generate(this.thenAST) + "}")).bind(this.elem);
+                var next = (new Function("x", escodegen.generate(this.thenAST))).bind(this.elem);
+            }
+            this._observer = Rx.Observer.create(next);
+        },
+        get id()
+        {
+            return this.rule.id;
+        },
+        activate: function (elem, ruleConfig) {
+            this.elem = elem;
+            this.when = ruleConfig.when;
+            this.do = ruleConfig.do;
+            this.then = ruleConfig.then;
+            var whenElemsAST = esquery(this.whenAST, 'MemberExpression');
+            var whenElemsReady = whenElemsAST.map(function (whenElemAST) {
+                if (whenElemAST.object.name.charAt(whenElemAST.object.name.length - 1) === '$') {
+                    if (!this.elem['_trackerDep_' + whenElemAST.object.name.slice(0, -1)])
+                        console.log("Hint");
+                    else
+                        this.elem['_trackerDep_' + whenElemAST.object.name.slice(0, -1)].depend();
+                    whenElemAST.object.name = this.elem[whenElemAST.object.name.slice(0, -1)];
+                }
+                return document.isDomReady(whenElemAST.object.name);
+            }.bind(this));
+            Promise.all(whenElemsReady).then(function (samplers) {
+                whenElemsAST.forEach(function (whenElemAST) {
+                    this.dispose = this.observable.subscribe(this.observer);
+                }.bind(this));
+            }.bind(this));
+            return (this);
+        },
+        destroy: function () {
+            this.dispose.dispose();
+        }
+    };
+</script>

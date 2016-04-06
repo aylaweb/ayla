@@ -1,4 +1,4 @@
-vip-message-panel
+Ayla
 ==============
 
-Documentation for vip-message-panel
+Documentation for Ayla
